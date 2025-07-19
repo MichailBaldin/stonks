@@ -1,0 +1,11 @@
+{
+  "go.buildFlags": [
+    "-v"
+  ], // Флаги для сборки
+  "go.testFlags": [
+    "-v"
+  ], // Флаги для тестирования
+  "go.toolsEnvVars": {
+    "GOFLAGS": "-mod=readonly" // Режим работы с модулями
+  }
+}
