@@ -1,0 +1,27 @@
+[tool.ruff]
+# Длина строки
+line-length = 88
+
+# Включаем дополнительные правила
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # Pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+
+# Исключаем файлы
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.format]
+# Используем двойные кавычки
+quote-style = "double"
