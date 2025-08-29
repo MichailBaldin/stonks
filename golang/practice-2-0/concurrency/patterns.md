@@ -81,6 +81,15 @@ func main() {
 **3) Semaphore (ограничить параллелизм до K)**
 
 ```go
+// задаем кол-во параллельных воркеров
+// создаем семафор (буф канал на нужное нам кол-во)
+// не забываем waitgroup
+// допустим в цикле запускаем необходимое кол-во тасок
+// занимаем семафор пустой структорой
+// запускам горутину-таску
+// после завершения читаем из семафора структуру
+// ждем завершения работы всех тасок
+
 package main
 
 import "sync"
@@ -156,20 +165,64 @@ func main() {
 ```go
 package main
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
-func merge[T any](chs ...<-chan T) <-chan T {
-	out := make(chan T)
-	var wg sync.WaitGroup
-	output := func(c <-chan T) {
-		defer wg.Done()
-		for v := range c { out <- v }
+// fanIn сливает несколько входных каналов int в один выходной.
+// Идея: для КАЖДОГО входного канала запускаем горутину,
+// которая перекладывает его элементы в общий out.
+// Когда все такие горутины закончатся — закрываем out.
+func fanIn(chs ...<-chan int) <-chan int {
+	out := make(chan int)     // общий выход
+	var wg sync.WaitGroup     // ждём всех "перекладчиков"
+
+	// forward читает из одного канала c и пишет в out
+	forward := func(c <-chan int) {
+		defer wg.Done()       // сигнал: эта горутина закончила работу
+		for v := range c {    // пока вход не закрыт
+			out <- v          // переотправляем элемент в общий выход
+		}
 	}
-	wg.Add(len(chs))
-	for _, c := range chs { go output(c) }
-	go func() { wg.Wait(); close(out) }()
+
+	wg.Add(len(chs))          // столько будет горутин-писателей в out
+	for _, c := range chs {
+		go forward(c)
+	}
+
+	// Закрываем out, когда ВСЕ писатели завершатся.
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
 	return out
 }
+
+// Мини-демо: не обязательно для шаблона, просто для проверки.
+func main() {
+	// Делаем два источника и что-то в них пишем.
+	a := make(chan int)
+	b := make(chan int)
+
+	go func() {
+		defer close(a)         // кто открыл канал — тот и закрывает
+		for i := 1; i <= 3; i++ { a <- i }
+	}()
+
+	go func() {
+		defer close(b)
+		for i := 100; i <= 102; i++ { b <- i }
+	}()
+
+	out := fanIn(a, b)
+
+	for v := range out {
+		fmt.Println(v)
+	}
+}
+
 ```
 
 **6) Цепочка обработчиков / конвейер (stage-by-stage)**
@@ -203,6 +256,126 @@ func main() {
 	p2 := stage2(p1)
 
 	for v := range p2 { _ = v }
+}
+```
+
+**7) fan-in → fan-out**
+слить несколько источников в один поток, затем распараллелить обработку на N воркеров и собрать результаты обратно в один канал.
+
+```go
+package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+////////////////////////////////////////////////////////////
+// 1) FAN-IN: несколько входных каналов int -> один общий //
+////////////////////////////////////////////////////////////
+
+func fanIn(chs ...<-chan int) <-chan int {
+	out := make(chan int) // общий выход
+	var wg sync.WaitGroup
+
+	forward := func(c <-chan int) {
+		defer wg.Done()
+		for v := range c {  // пока вход не закрыт
+			out <- v        // перекладываем элемент в общий out
+		}
+	}
+
+	wg.Add(len(chs))
+	for _, c := range chs {
+		go forward(c)
+	}
+
+	// Закрываем out, когда ВСЕ "писатели" в него завершатся.
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
+
+////////////////////////////////////////////////////////////
+// 2) FAN-OUT: один вход -> N воркеров, общий выход out  //
+////////////////////////////////////////////////////////////
+
+// startWorkers запускает N одинаковых воркеров.
+// Каждый читает из общего in (fan-out) и пишет результат в общий out.
+// Когда все воркеры завершатся, out закрывается.
+func startWorkers(n int, in <-chan int) <-chan int {
+	out := make(chan int) // общий канал результатов
+	var wg sync.WaitGroup
+
+	worker := func(id int) {
+		defer wg.Done()
+		for v := range in {         // каждый воркер читает из ОДНОГО in
+			// Здесь — "работа". Сейчас просто заглушка.
+			// Реальная логика: compute(v), io(v), http(v) и т.п.
+			res := process(v)
+			out <- res              // отправляем результат
+		}
+	}
+
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go worker(i)
+	}
+
+	// Важно: out закрывает ТОЛЬКО владелец (здесь — мы),
+	// после того как все воркеры закончат писать.
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
+
+/////////////////////////////////////////////
+// 3) Простейшая "работа" — заглушка        //
+/////////////////////////////////////////////
+
+func process(v int) int {
+	// Имитируем нагрузку (не обязательно для шаблона)
+	time.Sleep(10 * time.Millisecond)
+	return v * 10 // например, умножаем на 10
+}
+
+////////////////////////////////////////////////////////////
+// 4) Мини-демо сборки: (srcA, srcB) -> fanIn -> workers //
+////////////////////////////////////////////////////////////
+
+func main() {
+	// Два источника как пример (в реальном коде это могут быть разные производители)
+	srcA := make(chan int)
+	srcB := make(chan int)
+
+	// Кто открыл канал — тот и закрывает.
+	go func() {
+		defer close(srcA)
+		for i := 1; i <= 5; i++ { srcA <- i }
+	}()
+	go func() {
+		defer close(srcB)
+		for i := 100; i <= 104; i++ { srcB <- i }
+	}()
+
+	// 1) Сливаем источники -> общий поток
+	in := fanIn(srcA, srcB)
+
+	// 2) Распараллеливаем обработку на N воркеров (fan-out)
+	const N = 3
+	results := startWorkers(N, in)
+
+	// 3) Читаем единый поток результатов
+	for r := range results {
+		fmt.Println("result:", r)
+	}
 }
 ```
 
