@@ -4,7 +4,7 @@
 
 # мини-шаблоны (перепечатать до автоматизма)
 
-**1) Worker Pool (N воркеров, одна очередь)**
+## **1) Worker Pool (N воркеров, одна очередь)**
 
 ```go
 // создать каналы с тасками и результатами
@@ -53,7 +53,7 @@ func main() {
 }
 ```
 
-**2) Rate Limiter (тикер «по одному каждые T»)**
+## **2) Rate Limiter (тикер «по одному каждые T»)**
 
 ```go
 // задаем частоту через тикер, не забываем закрыть тикер
@@ -78,7 +78,7 @@ func main() {
 
 (вариант «токены» — просто `tokens := make(chan struct{}, B)` и периодически добавлять в него токены через тикер.)
 
-**3) Semaphore (ограничить параллелизм до K)**
+## **3) Semaphore (ограничить параллелизм до K)**
 
 ```go
 // задаем кол-во параллельных воркеров
@@ -129,38 +129,90 @@ func generator(nums []int) <-chan int {
 }
 ```
 
-**4) Fan-out (одна очередь → много воркеров, без результатов)**
-
+## **4) Fan-out (одна очередь → много воркеров, без результатов)**
 ```go
 package main
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 func main() {
-	in := make(chan int)
+	jobs := make(chan int)
 	const N = 4
-	var wg sync.WaitGroup
+	wg := &sync.WaitGroup{}
 
-	worker := func() {
-		defer wg.Done()
-		for v := range in {
-			_ = v // process
-		}
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go worker(jobs, wg)
 	}
 
-	wg.Add(N)
-	for i := 0; i < N; i++ { go worker() }
-
 	go func() {
-		for i := 0; i < 10; i++ { in <- i }
-		close(in)
+		for j := range 10 {
+			jobs <- j
+		}
+		close(jobs)
+	}()
+
+	wg.Wait()
+}
+
+func worker(jobs <-chan int, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for job := range jobs {
+		fmt.Println(job * 2)
+	}
+}
+```
+Немного пошалим и добавим еще контекст для жиру
+```go
+package main
+
+import (
+	"context"
+	"sync"
+	"time"
+)
+
+func worker(ctx context.Context, jobs <-chan int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case v, ok := <-jobs:
+			if !ok { return }        // канал закрыт — выходим
+			_ = v                    // process(v)
+		}
+	}
+}
+
+func main() {
+	const N = 4
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// воркеры
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go worker(ctx, jobs, &wg)
+	}
+
+	// продюсер
+	go func() {
+		for j := 0; j < 10; j++ { jobs <- j }
+		close(jobs)                 // мы открыли — мы и закрываем
 	}()
 
 	wg.Wait()
 }
 ```
 
-**5) Fan-in (несколько источников → один канал)**
+## **5) Fan-in (несколько источников → один канал)**
 
 ```go
 package main
@@ -170,28 +222,25 @@ import (
 	"sync"
 )
 
-// fanIn сливает несколько входных каналов int в один выходной.
-// Идея: для КАЖДОГО входного канала запускаем горутину,
-// которая перекладывает его элементы в общий out.
-// Когда все такие горутины закончатся — закрываем out.
+// forward читает из одного входного канала и пишет всё в out.
+func forward(c <-chan int, out chan<- int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for v := range c {
+		out <- v
+	}
+}
+
+// fanIn объединяет несколько входных каналов в один.
 func fanIn(chs ...<-chan int) <-chan int {
-	out := make(chan int)     // общий выход
-	var wg sync.WaitGroup     // ждём всех "перекладчиков"
+	out := make(chan int)
+	var wg sync.WaitGroup
 
-	// forward читает из одного канала c и пишет в out
-	forward := func(c <-chan int) {
-		defer wg.Done()       // сигнал: эта горутина закончила работу
-		for v := range c {    // пока вход не закрыт
-			out <- v          // переотправляем элемент в общий выход
-		}
-	}
-
-	wg.Add(len(chs))          // столько будет горутин-писателей в out
+	wg.Add(len(chs))
 	for _, c := range chs {
-		go forward(c)
+		go forward(c, out, &wg)
 	}
 
-	// Закрываем out, когда ВСЕ писатели завершатся.
+	// Закроем out, когда все forward завершат работу
 	go func() {
 		wg.Wait()
 		close(out)
@@ -200,24 +249,107 @@ func fanIn(chs ...<-chan int) <-chan int {
 	return out
 }
 
-// Мини-демо: не обязательно для шаблона, просто для проверки.
 func main() {
-	// Делаем два источника и что-то в них пишем.
 	a := make(chan int)
 	b := make(chan int)
 
+	// два источника
 	go func() {
-		defer close(a)         // кто открыл канал — тот и закрывает
-		for i := 1; i <= 3; i++ { a <- i }
+		defer close(a)
+		for i := 0; i < 3; i++ {
+			a <- i
+		}
 	}()
-
 	go func() {
 		defer close(b)
-		for i := 100; i <= 102; i++ { b <- i }
+		for i := 100; i < 103; i++ {
+			b <- i
+		}
 	}()
 
 	out := fanIn(a, b)
+	for v := range out {
+		fmt.Println(v)
+	}
+}
 
+```
+fan-in с контекстом
+
+```go
+package main
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+)
+
+// forwardCtx читает из одного канала и пишет в out,
+// завершается по закрытию входа или по ctx.Done().
+func forwardCtx(ctx context.Context, c <-chan int, out chan<- int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case v, ok := <-c:
+			if !ok {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case out <- v:
+			}
+		}
+	}
+}
+
+// fanInCtx объединяет несколько каналов в один с поддержкой context.
+func fanInCtx(ctx context.Context, chs ...<-chan int) <-chan int {
+	out := make(chan int)
+	var wg sync.WaitGroup
+
+	wg.Add(len(chs))
+	for _, c := range chs {
+		go forwardCtx(ctx, c, out, &wg)
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
+
+func main() {
+	a := make(chan int)
+	b := make(chan int)
+
+	// источники
+	go func() {
+		defer close(a)
+		for i := 0; i < 5; i++ {
+			a <- i
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	go func() {
+		defer close(b)
+		for i := 100; i < 105; i++ {
+			b <- i
+			time.Sleep(70 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	out := fanInCtx(ctx, a, b)
 	for v := range out {
 		fmt.Println(v)
 	}
@@ -225,7 +357,7 @@ func main() {
 
 ```
 
-**6) Цепочка обработчиков / конвейер (stage-by-stage)**
+## **6) Цепочка обработчиков / конвейер (stage-by-stage)**
 
 ```go
 package main
@@ -259,7 +391,7 @@ func main() {
 }
 ```
 
-**7) fan-in → fan-out**
+## **7) fan-in → fan-out**
 слить несколько источников в один поток, затем распараллелить обработку на N воркеров и собрать результаты обратно в один канал.
 
 ```go
