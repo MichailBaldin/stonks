@@ -1,6 +1,19 @@
 package main
 
-// 1. Сделай HTTP-сервер на net/http, который на /version отвечает строкой "v1.0.0".
+import (
+	"log"
+	"net/http"
+)
+
+// 1. Сделай HTTP-сервер на net/http,
+// который на /version отвечает строкой "v1.0.0".
+func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("v1.0.0\n"))
+	})
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
 
 // 2. На запрос GET /user?id=123 сервер должен вернуть "User ID: 123".
 
