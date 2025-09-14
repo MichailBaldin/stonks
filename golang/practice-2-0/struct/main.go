@@ -1,5 +1,88 @@
 package main
 
+// ======================================
+// Тренажёр: Структуры, встраивание, коллекции (v1)
+// ======================================
+// Формат как раньше: короткие условия, базовое API, без изысков.
+
+// --- Блок A. База структур (литералы, zero value, сравнение) ---
+
+// 1. Опиши структуру User{ID int; Name string}. Создай zero value и литерал, выведи поля.
+// 2. Добавь метод String() для User, который печатает "ID:Name". Вызови через fmt.Println(u).
+// 3. Сделай тип Address{City string; Street string}. Вложи Address в User как поле (композиция), выведи City.
+// 4. Сравни два значения Address оператором ==. Объясни, почему User с полем-срезом так сравнить нельзя (закомментируй попытку).
+// 5. Создай слайс []User из 3 элементов и измени Name у второго — проверь выводом.
+
+// --- Блок B. Методы: значение vs указатель ---
+
+// 6. Добавь к User метод Rename(new string) с value receiver. Вызови и проверь, изменился ли Name.
+// 7. Переделай Rename на pointer receiver и повтори проверку.
+// 8. Реализуй метод Clone() User, который возвращает копию со сменой Name (оригинал не меняется).
+// 9. Сделай функцию NewUser(id int, name string) *User (конструктор) — верни указатель, проверь, что поля выставлены.
+// 10. Для Address сделай метод Full() string = "City, Street". Вызови через u.Address.Full().
+
+// --- Блок C. Встраивание (embedding) полей и метод-promotion ---
+
+// 11. Создай тип Timestamps{CreatedAt int64; UpdatedAt int64}. Встрой его анонимно в User: Timestamps.
+//     Доступ к полям через u.CreatedAt.
+// 12. Добавь Timestamps метод Touch() — обновляет UpdatedAt. Вызови u.Touch() (через promotion).
+// 13. Создай тип Named{Name string} и встрой в User: Named. Покажи конфликт имён полей (если уже есть Name).
+// 14. Разреши конфликт: убери поле Name в User, оставь его во встраиваемом Named. Доступ к имени — u.Name.
+// 15. Встрой *Address (указатель) в User: *Address. Проверь панику при обращении u.City без инициализации. Почини инициализацией.
+// 16. Добавь к Address метод Move(city, street). Вызови u.Move(... ) через promotion.
+// 17. Создай админов: тип Admin с встраиваемым User. Добавь метод IsAdmin() bool. Проверь доступ к полям User из Admin.
+// 18. Сделай два уровня встраивания: SuperAdmin{Admin}, вызови метод Touch() (из Timestamps через User) на SuperAdmin.
+// 19. Встрой sync.Mutex в тип SafeCounter{sync.Mutex; m map[string]int}. Покажи Lock/Unlock и инкремент по ключу.
+// 20. Удали embedding Mutex и сделай именованное поле. Покажи, что теперь нужен s.Mutex.Lock() вместо promotion.
+
+// --- Блок D. Коллекции структур (слайсы) ---
+
+// 21. Создай []User и реализуй функции: AppendUser([]User, User) []User; IndexByID([]User, id) int.
+// 22. Отфильтруй []User по предикату (Name != ""), используя "in-place filter": dst := users[:0].
+// 23. Отсортируй []User по Name с помощью sort.Slice.
+// 24. Реализуй Paginate(users []User, page, per int) []User — верни подотрезок с границами.
+// 25. Сделай глубокое копирование []User (копии значений), измени копию и покажи независимость от оригинала.
+
+// --- Блок E. Коллекции структур (мапы) ---
+
+// 26. Построй индекс: map[int]*User по слайсу пользователей. Проверь, что изменения через указатель видны в исходном слайсе.
+// 27. Реализуй MergeUsersByID(dst map[int]*User, src []User): добавляй отсутствующих, обновляй Name по совпавшим ID.
+// 28. Инвертируй индекс имён: map[string][]int где ключ — Name, значение — список ID.
+// 29. Реализуй DiffUsersByID(a, b map[int]*User]): верни списки added/removed/updated ID.
+// 30. Реализуй безопасное чтение: GetUser(m map[int]*User, id int) (*User, bool), не создавая лишних записей.
+
+// --- Блок F. Вложенные слайсы и мапы внутри структур ---
+
+// 31. Тип Group{Name string; Members []User}. Добавь метод Add(u User) и RemoveByID(id int) с сохранением порядка.
+// 32. Тип Org{Name string; Teams map[string]*Group}. Функция AddToTeam(org *Org, team string, u User) с инициализацией map и Members.
+// 33. Тип Catalog{ByCity map[string][]*User}. Добавь пользователя по городу, инициализируя при первом добавлении.
+// 34. Тип KVStore{Buckets map[string]map[string]string}. Реализуй Upsert(bucket, key, val string).
+// 35. Покажи aliasing: два Group ссылаются на один и тот же слайс Members. Измени один — увидь изменения в другом. Почини глубокой копией.
+
+// --- Блок G. JSON-теги и сериализация ---
+
+// 36. Добавь json-теги в User: id, name. Сериализуй []User в JSON и обратно.
+// 37. Убери поле Address из JSON (omitempty + "-" для внутренних). Проверь результат.
+// 38. Тип Profile{User; Skills []string}. Сериализуй и проверь, что поля User промотируются в JSON.
+// 39. Создай map[int]User и сериализуй — поймай конвертацию ключей в строки. Прочитай обратно в map[string]User или в []pair.
+
+// --- Блок H. Конструкторы и валидация ---
+
+// 40. Напиши NewAddress(city, street string) (*Address, error) с простой валидацией (не пустые строки).
+// 41. Сделай NewUserWithAddress(id int, name string, addr *Address) (*User, error) — собирает валидный объект.
+// 42. Добавь метод Validate() error для User (проверка Name != ""). Вызови перед добавлением в коллекцию.
+// 43. Тип Registry{byID map[int]*User}. Реализуй Register(u *User) error — ошибка при дубликате ID, иначе сохранить.
+// 44. Реализуй FindByCity(reg *Registry, city string) []User — по вложенному адресу (*Address).
+
+// --- Блок I. Копирование, мутабельность, границы ---
+
+// 45. Покажи разницу копии значения и указателя: u2 := u; p := &u; измени p.Name — проверь u2.Name.
+// 46. В Group реализуй DeepClone() Group: новая копия слайса и значений.
+// 47. Сделай SafeSlice(users []User) []User, который возвращает копию для чтения "без утечки" внутреннего слайса наружу.
+// 48. Реализуй метод TrimTo(n int) для Group — усечь Members до n безопасно (границы, не паниковать).
+// 49. Реализуй ReplaceMember(g *Group, i int, u User) error — безопасная замена по индексу с проверкой границ.
+// 50. Реализуй Snapshot(reg *Registry) map[int]User — вернуть "замороженную" копию (значения, не указатели).
+
 // 1. Храни температуру по дням недели. Выбери структуру данных, чтобы:
 //   - быстро получить температуру по названию дня ("Mon", "Tue"...),
 //   - уметь перебрать дни по порядку.
