@@ -206,6 +206,7 @@ uv add requests
 uv run main.py
 ```
 
+
 ## ⚙️ Шаг 8: Настройка VS Code (опционально)
 
 ### Установка VS Code

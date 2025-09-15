@@ -1,27 +1,18 @@
+[project]
+name = "stonks-python"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "mypy>=1.18.1",
+    "requests>=2.32.5",
+]
+
 [tool.ruff]
-# Длина строки
 line-length = 88
+exclude = [".git", "__pycache__", ".venv", "build", "dist"]
 
-# Включаем дополнительные правила
-select = [
-    "E",  # pycodestyle errors
-    "W",  # pycodestyle warnings
-    "F",  # Pyflakes
-    "I",  # isort
-    "B",  # flake8-bugbear
-    "C4", # flake8-comprehensions
-    "UP", # pyupgrade
-]
-
-# Исключаем файлы
-exclude = [
-    ".git",
-    "__pycache__",
-    ".venv",
-    "build",
-    "dist",
-]
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
 
 [tool.ruff.format]
-# Используем двойные кавычки
 quote-style = "double"
